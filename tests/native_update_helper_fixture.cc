@@ -1,0 +1,66 @@
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <charconv>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <string_view>
+
+namespace {
+
+const char* Environment(const char* name) {
+  const char* value = std::getenv(name);
+  return value == nullptr ? "" : value;
+}
+
+int IntegerEnvironment(const char* name, int fallback) {
+  const std::string_view value(Environment(name));
+  int parsed = fallback;
+  const auto result =
+      std::from_chars(value.data(), value.data() + value.size(), parsed);
+  return result.ec == std::errc() && result.ptr == value.data() + value.size()
+             ? parsed
+             : fallback;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  if (argc != 3 || std::string_view(argv[1]) != "update" ||
+      (std::string_view(argv[2]) != "--startup-preflight" &&
+       std::string_view(argv[2]) != "--force-run-latest")) {
+    return 64;
+  }
+  const char* capture = Environment("SIGHTER_TEST_UPDATE_CAPTURE");
+  if (capture[0] != '\0') {
+    std::ofstream output(capture);
+    output << Environment("SIGHTER_CONFIG_FILE") << '\n'
+           << Environment("SIGHTER_DATA_ROOT") << '\n'
+           << Environment("SIGHTER_CACHE_ROOT") << '\n'
+           << Environment("SIGHTER_STATE_ROOT") << '\n';
+    if (!output) return 65;
+  }
+  const char* argument_capture =
+      Environment("SIGHTER_TEST_UPDATE_ARGUMENT_CAPTURE");
+  if (argument_capture[0] != '\0') {
+    std::ofstream output(argument_capture);
+    output << argv[2] << '\n';
+    if (!output) return 67;
+  }
+  const char* diagnostics = Environment("SIGHTER_TEST_UPDATE_STDERR");
+  if (diagnostics[0] != '\0') {
+    std::fputs(diagnostics, stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+  }
+  const int progress = IntegerEnvironment("SIGHTER_UPDATE_PROGRESS_FD", -1);
+  if (progress >= 0) {
+    constexpr std::string_view packet = "PDownloading Roblox...";
+    if (send(progress, packet.data(), packet.size(), MSG_NOSIGNAL) < 0) {
+      return 66;
+    }
+  }
+  return IntegerEnvironment("SIGHTER_TEST_UPDATE_EXIT", 0);
+}

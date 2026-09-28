@@ -1,0 +1,160 @@
+name: Flatpak
+
+on:
+  workflow_run:
+    workflows: [Native packages]
+    types: [completed]
+  pull_request:
+    paths:
+      - '.github/workflows/flatpak.yml'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - 'LICENSE'
+      - 'cmake/**'
+      - 'config/**'
+      - 'include/**'
+      - 'packaging/flatpak/**'
+      - 'packaging/icons/**'
+      - 'packaging/space.bigrat.sighter.desktop'
+      - 'packaging/space.bigrat.sighter.metainfo.xml'
+      - 'packaging/space.bigrat.sighter.svg'
+      - 'src/**'
+      - 'stubs/**'
+      - 'third_party/**'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: flatpak-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flatpak:
+    name: Flatpak build (${{ matrix.arch }})
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.head_branch == 'main')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      FLATPAK_ARCH: ${{ matrix.arch }}
+      SIGHTER_PUBLISH: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+      SIGHTER_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
+
+      - name: Install Flatpak builder
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes flatpak flatpak-builder gnupg
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak bundle
+        shell: bash
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          set -Eeuo pipefail
+          git update-ref refs/heads/main "$SIGHTER_SOURCE_SHA"
+          builder_signing=()
+          bundle_keys=()
+          if [[ "$SIGHTER_PUBLISH" == true ]]; then
+            [[ -n "$FLATPAK_GPG_PRIVATE_KEY" && \
+               -n "$FLATPAK_GPG_KEY_ID" ]]
+            install -d -m 0700 "$RUNNER_TEMP/sighter-gnupg"
+            printf '%s' "$FLATPAK_GPG_PRIVATE_KEY" | \
+              gpg --batch --homedir "$RUNNER_TEMP/sighter-gnupg" --import
+            gpg --batch --homedir "$RUNNER_TEMP/sighter-gnupg" \
+              --export "$FLATPAK_GPG_KEY_ID" >sighter-flatpak.gpg
+            builder_signing=(
+              "--gpg-sign=$FLATPAK_GPG_KEY_ID"
+              "--gpg-homedir=$RUNNER_TEMP/sighter-gnupg"
+            )
+            bundle_keys=(--gpg-keys=sighter-flatpak.gpg)
+          fi
+          flatpak-builder \
+            --arch="$FLATPAK_ARCH" \
+            --jobs=4 \
+            --user \
+            --install-deps-from=flathub \
+            --disable-rofiles-fuse \
+            --force-clean \
+            --default-branch=stable \
+            --repo=repo \
+            "${builder_signing[@]}" \
+            build-flatpak-ci \
+            packaging/flatpak/space.bigrat.sighter.json
+          flatpak build-bundle \
+            --arch="$FLATPAK_ARCH" \
+            "${bundle_keys[@]}" \
+            repo \
+            "Sighter-${FLATPAK_ARCH}.flatpak" \
+            space.bigrat.sighter \
+            stable
+
+      - name: Upload Flatpak
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Sighter-${{ matrix.arch }}-flatpak
+          path: Sighter-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish Flatpak bundles
+    if: >-
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main')
+    needs: flatpak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download Flatpak bundles
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: Sighter-*-flatpak
+          path: flatpak-bundles
+          merge-multiple: true
+
+      - name: Update continuous release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if ! gh release view continuous >/dev/null 2>&1; then
+            gh release create continuous \
+              --prerelease \
+              --title "Sighter continuous" \
+              --notes "Automated development packages from main." || \
+              gh release view continuous >/dev/null
+          fi
+          gh release upload continuous flatpak-bundles/*.flatpak --clobber

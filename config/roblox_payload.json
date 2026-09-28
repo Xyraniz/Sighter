@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "package": "com.roblox.client",
+  "version_name": "2.736.1408",
+  "version_code": 2998,
+  "abi": "x86_64",
+  "elf_build_id": "ade08266c67aee88ec9c1d00902150e1684dad3a",
+  "sha256": {
+    "libroblox": "4343a6a900d1fca27ff8e10b9d9c86bee40a5d0ba547cb29903b7769f4f42a9d",
+    "base_apk": "a4a71ec39df6619a56ab7adce0959d1d60354835485b53806f4026914287ea86",
+    "x86_64_split_apk": "a4a71ec39df6619a56ab7adce0959d1d60354835485b53806f4026914287ea86"
+  },
+  "signing_certificates_sha256": [
+    "44932ea35a17a267372d71b54d1a0cb3da0dca5113e94406ae2fe18090ba1477"
+  ],
+  "assets": {
+    "file_count": 1836,
+    "sha256_tree": "caee48e11c194bc11852493f53ff67d5e2bb233172f12b87ea5fca97c0c10840"
+  },
+  "source": "apk-pure-native",
+  "imported_at": "2026-08-31T16:30:19Z",
+  "compatibility_status": "supported",
+  "apk_layout": "monolithic"
+}

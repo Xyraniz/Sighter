@@ -1,0 +1,65 @@
+# Maintainer: Xyraniz <109302452+Xyraniz@users.noreply.github.com>
+
+pkgname=sighter
+pkgver=1.0.3
+pkgrel=2
+pkgdesc='Android x86-64 Roblox compatibility runtime for Linux'
+arch=('x86_64')
+url='https://github.com/Xyraniz/Sighter'
+license=('Apache-2.0')
+depends=(
+  'capstone'
+  'curl'
+  'fontconfig'
+  'gtk4'
+  'libadwaita'
+  'libelf'
+  'libglvnd'
+  'libplacebo'
+  'libpng'
+  'libutf8proc'
+  'libyaml'
+  'minizip'
+  'nlohmann-json'
+  'openssl'
+  'sdl3>=3.4'
+  'sdl3_ttf'
+  'vulkan-icd-loader'
+  'webkitgtk-6.0'
+  'zlib'
+)
+makedepends=(
+  'cmake>=3.20'
+  'git'
+  'lld'
+  'ninja'
+  'pkgconf'
+)
+optdepends=('gamemode: Feral GameMode integration')
+options=('!debug' 'strip')
+source=()
+sha256sums=()
+
+_sighter_source_dir="${SIGHTER_SOURCE_DIR:-${startdir}/../..}"
+
+prepare() {
+  [[ -f "${_sighter_source_dir}/CMakeLists.txt" ]] ||
+    error 'run makepkg from a complete Sighter checkout'
+}
+
+build() {
+  cmake -S "${_sighter_source_dir}" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DSIGHTER_DEFAULT_COMPATIBILITY_MANIFEST=/usr/share/sighter/metadata/roblox_compatibility.json \
+    -DSIGHTER_DEFAULT_SIGNING_TRUST_MANIFEST=/usr/share/sighter/metadata/roblox_signing_certificates.json \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="${pkgdir}" cmake --install build
+  install -Dm644 "${_sighter_source_dir}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

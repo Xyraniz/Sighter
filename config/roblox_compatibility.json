@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "version_name": "2.721.1108",
+      "version_code": 2350,
+      "abi": "x86_64",
+      "elf_build_id": "50e1b0abd123350e794226062fe3a1ef360c5f0d",
+      "status": "legacy-researched",
+      "default_allowed": false,
+      "allow_legacy_binary_patches": true,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": false,
+      "reason": "Reverse-engineered startup baseline; no verified real frame."
+    },
+    {
+      "version_name": "2.725.1142",
+      "version_code": 2546,
+      "abi": "x86_64",
+      "elf_build_id": "d0cb1fa0deb3d9161b4cd77530cbcd2e50de3a21",
+      "status": "supported",
+      "default_allowed": true,
+      "allow_legacy_binary_patches": false,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": true,
+      "user_game_settings_fullscreen_setter_rva": "0x4095564",
+      "fmod_output_device_bridge": {
+        "vtable_rva": "0x6742678",
+        "string_constructor_rva": "0x1bf898c",
+        "count_method_rva": "0x2c2a082",
+        "info_method_rva": "0x2c2a122",
+        "current_method_rva": "0x2c2a0d2",
+        "select_method_rva": "0x2c29e56"
+      },
+      "reason": "Verified 2026-07-10 on the current host: name-resolved ASMA/V2 startup, native Vulkan present, explicit lifecycle teardown, and Build-ID-scoped host output-device interposition without executable code patches or signal recovery; exact constructor replay remains Build-ID scoped."
+    },
+    {
+      "version_name": "2.727.1199",
+      "version_code": 2628,
+      "abi": "x86_64",
+      "elf_build_id": "1686400865ae0e408cd7bd67de7a439625c6fd13",
+      "status": "supported",
+      "default_allowed": true,
+      "allow_legacy_binary_patches": false,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": true,
+      "reason": "Verified 2026-07-16 on the current host: independently signature-matched native allocator and pre-JNI state, 3479 constructors replayed without recovery, JNI_OnLoad and ASMA/V2 startup, 2988 Vulkan shaders, a real vkQueuePresentKHR, and explicit lifecycle teardown to Stopped; legacy executable patches and signal recovery remain disabled."
+    },
+    {
+      "version_name": "2.734.917",
+      "version_code": 2908,
+      "abi": "x86_64",
+      "elf_build_id": "63c5109637b7d7b2bdb8ed8f858023ff5ef49326",
+      "status": "supported",
+      "default_allowed": true,
+      "allow_legacy_binary_patches": false,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": true,
+      "user_game_settings_fullscreen_setter_rva": "0x44fee64",
+      "fmod_output_device_bridge": {
+        "vtable_rva": "0x6b7eee8",
+        "string_constructor_rva": "0x1cfd5ec",
+        "count_method_rva": "0x32736d2",
+        "info_method_rva": "0x3273772",
+        "current_method_rva": "0x3273722",
+        "select_method_rva": "0x32734a6"
+      },
+      "reason": "Verified 2026-08-28 on the current host: the machine-derived exact-Build-ID profile passed two isolated no-recovery Tier C Vulkan canaries; fullscreen state synchronization and Build-ID-scoped FmodAudioDevice output interposition were re-derived for the current payload; legacy executable patches and signal recovery remain disabled."
+    },
+    {
+      "version_name": "2.736.1408",
+      "version_code": 2998,
+      "abi": "arm64-v8a",
+      "elf_build_id": "ed2b035768b1513561d0e6ea7f9bbec35b0e60e5",
+      "status": "supported",
+      "default_allowed": true,
+      "allow_legacy_binary_patches": false,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": true,
+      "reason": "AArch64 arm64-v8a payload of the same 2.736.1408 release as the verified x86-64 profile; allocator, constructor replay, and pre-JNI bootstrap RVAs were derived by cross-architecture semantic matching."
+    },
+    {
+      "version_name": "2.736.1408",
+      "version_code": 2998,
+      "abi": "x86_64",
+      "elf_build_id": "ade08266c67aee88ec9c1d00902150e1684dad3a",
+      "status": "supported",
+      "default_allowed": true,
+      "allow_legacy_binary_patches": false,
+      "allow_host_abi_bridges": true,
+      "allow_host_constructor_replay": true,
+      "user_game_settings_fullscreen_setter_rva": "0x45ad8aa",
+      "fmod_output_device_bridge": {
+        "vtable_rva": "0x6c58040",
+        "string_constructor_rva": "0x1d32df8",
+        "count_method_rva": "0x32d0ee0",
+        "info_method_rva": "0x32d0f80",
+        "current_method_rva": "0x32d0f30",
+        "select_method_rva": "0x32d0cb4",
+        "input_count_method_rva": "0x32d12dc",
+        "input_info_method_rva": "0x32d12ea",
+        "input_current_method_rva": "0x32d13a6",
+        "input_select_method_rva": "0x32d0a56"
+      },
+      "reason": "Verified 2026-09-06: exact Build-ID profile passed two isolated no-recovery Tier C Vulkan canaries and real game sessions, including fullscreen state synchronization and host FMOD output-device interposition; legacy executable patches and signal recovery remain disabled."
+    }
+  ]
+}

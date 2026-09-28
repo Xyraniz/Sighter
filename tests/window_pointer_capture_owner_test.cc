@@ -1,0 +1,312 @@
+#include "window/window_pointer_capture_owner.h"
+
+#include <gtest/gtest.h>
+
+#include <cstddef>
+#include <vector>
+
+namespace sighter {
+namespace window {
+namespace {
+
+class FakeBackend final : public PointerCaptureBackend {
+ public:
+  bool Apply(bool relative_mode, bool cursor_visible) override {
+    calls.push_back({relative_mode, cursor_visible});
+    return succeeds;
+  }
+
+  struct Call {
+    bool relative_mode;
+    bool cursor_visible;
+  };
+  std::vector<Call> calls;
+  bool succeeds = true;
+};
+
+struct QueryState {
+  bool succeeds = true;
+  bool locked_center = false;
+};
+
+bool Query(void* context, bool* locked_center) {
+  auto* state = static_cast<QueryState*>(context);
+  if (state == nullptr || locked_center == nullptr || !state->succeeds) {
+    return false;
+  }
+  *locked_center = state->locked_center;
+  return true;
+}
+
+struct ReentrantQueryState {
+  WindowPointerCaptureOwner* owner = nullptr;
+};
+
+bool ClearQueryReentrantly(void* context, bool* locked_center) {
+  auto* state = static_cast<ReentrantQueryState*>(context);
+  if (state == nullptr || state->owner == nullptr || locked_center == nullptr) {
+    return false;
+  }
+  *locked_center = false;
+  state->owner->ClearQuery();
+  return true;
+}
+
+TEST(WindowPointerCaptureOwnerTest, FollowsNativeMouseLockState) {
+  FakeBackend backend;
+  QueryState query;
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  query.locked_center = true;
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  query.locked_center = false;
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+}
+
+TEST(WindowPointerCaptureOwnerTest, TextInputPreservesNativeShiftLock) {
+  FakeBackend backend;
+  QueryState query{true, true};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  // Opening chat must not turn relative motion into absolute motion while
+  // Roblox still requests center lock: the pointer would reach the window edge
+  // and camera rotation would stop during typing.
+  EXPECT_TRUE(owner.Pump(true));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+
+  // Roblox can release its lock to let the user interact with a text field.
+  query.locked_center = false;
+  EXPECT_TRUE(owner.Pump(true));
+  EXPECT_FALSE(owner.captured());
+  query.locked_center = true;
+  EXPECT_TRUE(owner.Pump(true));
+  EXPECT_TRUE(owner.captured());
+
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_TRUE(owner.OnFocusLost());
+  EXPECT_FALSE(owner.captured());
+  // Regular pumps continue while the window is unfocused. A stale native
+  // lock must not recapture the pointer before focus actually returns.
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+  EXPECT_TRUE(owner.OnFocusGained(true));
+  EXPECT_TRUE(owner.captured());
+}
+
+TEST(WindowPointerCaptureOwnerTest, QueryOrCaptureFailureStaysReleased) {
+  FakeBackend backend;
+  backend.succeeds = false;
+  QueryState query{true, true};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  EXPECT_FALSE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+  EXPECT_EQ(backend.calls.size(), 2U);
+  query.succeeds = false;
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+}
+
+TEST(WindowPointerCaptureOwnerTest, QueryCanClearItselfWithoutDeadlock) {
+  FakeBackend backend;
+  WindowPointerCaptureOwner owner(&backend);
+  ReentrantQueryState query{&owner};
+  ASSERT_TRUE(owner.RegisterQuery(ClearQueryReentrantly, &query));
+
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(owner.captured());
+
+  QueryState replacement;
+  EXPECT_TRUE(owner.RegisterQuery(Query, &replacement));
+}
+
+TEST(WindowPointerCaptureOwnerTest, RightDragCapturesUntilButtonRelease) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  EXPECT_TRUE(owner.OnRightButton(true, false));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_TRUE(owner.captured());
+
+  EXPECT_TRUE(owner.OnRightButton(false, false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+}
+
+TEST(WindowPointerCaptureOwnerTest,
+     RightReleaseRestoresUnlockedStateWhenNoNativeLock) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  query.locked_center = true;
+  ASSERT_TRUE(owner.OnRightButton(true, false));
+  constexpr int kTenSecondsAt240Hz = 2400;
+  for (int pump = 0; pump < kTenSecondsAt240Hz; ++pump) {
+    ASSERT_TRUE(owner.Pump(false));
+  }
+  ASSERT_TRUE(owner.captured());
+
+  query.locked_center = false;
+  ASSERT_TRUE(owner.OnRightButton(false, false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.ShouldDispatchMouseMotion());
+}
+
+TEST(WindowPointerCaptureOwnerTest,
+     RightReleasePreservesNativeLockThatPredatedDrag) {
+  FakeBackend backend;
+  QueryState query{true, true};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  ASSERT_TRUE(owner.OnRightButton(true, false));
+  ASSERT_TRUE(owner.OnRightButton(false, false));
+
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  EXPECT_TRUE(owner.ShouldDispatchMouseMotion());
+}
+
+TEST(WindowPointerCaptureOwnerTest,
+     ShiftLockActivatedDuringRightDragSurvivesButtonRelease) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  ASSERT_TRUE(owner.OnRightButton(true, false));
+  query.locked_center = true;
+  ASSERT_TRUE(owner.OnShiftKeyPressed(false));
+  ASSERT_TRUE(owner.OnRightButton(false, false));
+
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  EXPECT_TRUE(owner.ShouldDispatchMouseMotion());
+}
+
+TEST(WindowPointerCaptureOwnerTest,
+     ShiftDuringRightDragDoesNotInventNativeMouseLock) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+
+  ASSERT_TRUE(owner.OnRightButton(true, false));
+  ASSERT_TRUE(owner.OnShiftKeyPressed(false));
+  ASSERT_TRUE(owner.OnRightButton(false, false));
+
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.ShouldDispatchMouseMotion());
+}
+
+TEST(WindowPointerCaptureOwnerTest, RightDragDoesNotDependOnNativeLockQuery) {
+  FakeBackend backend;
+  QueryState query{false, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  EXPECT_TRUE(owner.OnRightButton(true, false));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  EXPECT_TRUE(owner.OnRightButton(false, false));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+}
+
+TEST(WindowPointerCaptureOwnerTest, TextAndFocusCancelRightDragCapture) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  EXPECT_TRUE(owner.OnRightButton(true, true));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+  EXPECT_TRUE(owner.Pump(false));
+  EXPECT_TRUE(owner.captured());
+  EXPECT_TRUE(owner.OnFocusLost());
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+  EXPECT_TRUE(owner.OnFocusGained(false));
+  EXPECT_FALSE(owner.captured());
+}
+
+// Roblox draws its own cursor while it owns the pointer. Focus loss reveals the
+// system cursor; regaining focus has to hide it again in the same call, because
+// Pump() runs before SDL_PollEvent delivers the focus event and would otherwise
+// leave the desktop arrow on screen for a whole frame.
+TEST(WindowPointerCaptureOwnerTest, FocusGainHidesTheSystemCursorImmediately) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  ASSERT_TRUE(owner.Pump(false));
+  ASSERT_FALSE(owner.cursor_visible());
+
+  EXPECT_TRUE(owner.OnFocusLost());
+  EXPECT_TRUE(owner.cursor_visible());
+
+  const std::size_t calls_before = backend.calls.size();
+  EXPECT_TRUE(owner.OnFocusGained(false));
+  EXPECT_FALSE(owner.cursor_visible());
+  ASSERT_GT(backend.calls.size(), calls_before);
+  EXPECT_FALSE(backend.calls.back().cursor_visible);
+
+  // Text input releases capture but Roblox still owns the visible cursor.
+  EXPECT_TRUE(owner.OnFocusLost());
+  EXPECT_TRUE(owner.cursor_visible());
+  EXPECT_TRUE(owner.OnFocusGained(true));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+}
+
+TEST(WindowPointerCaptureOwnerTest, TextInputWithoutNativeCursorShowsSystemCursor) {
+  FakeBackend backend;
+  QueryState query{false, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+
+  EXPECT_TRUE(owner.Pump(true));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+
+  EXPECT_TRUE(owner.OnRightButton(true, true));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_TRUE(owner.cursor_visible());
+
+  query.succeeds = true;
+  EXPECT_TRUE(owner.Pump(true));
+  EXPECT_FALSE(owner.captured());
+  EXPECT_FALSE(owner.cursor_visible());
+}
+
+}  // namespace
+}  // namespace window
+}  // namespace sighter

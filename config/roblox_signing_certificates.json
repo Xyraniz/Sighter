@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "package": "com.roblox.client",
+  "trusted_sha256": [
+    "2bebd189e8d3106401347056c93d045b61e20e22d0c3cbed85474aeb00a3d12a",
+    "44932ea35a17a267372d71b54d1a0cb3da0dca5113e94406ae2fe18090ba1477"
+  ]
+}

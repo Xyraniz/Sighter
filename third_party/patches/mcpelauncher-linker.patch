@@ -1,0 +1,258 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a5396c9..c16d743 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -18 +18 @@ target_include_directories(linker PRIVATE include core/base/include core/liblog/
+-target_compile_definitions(linker PRIVATE PATH_MAX=256 _GNU_SOURCE)
++target_compile_definitions(linker PRIVATE PATH_MAX=4096 _GNU_SOURCE)
+@@ -28 +28 @@ if(NOT APPLE)
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/include/compat.h b/include/compat.h
+index 1abf474..4f435e0 100644
+--- a/include/compat.h
++++ b/include/compat.h
+@@ -0,0 +1,6 @@
++#ifndef _LARGEFILE64_SOURCE
++#define _LARGEFILE64_SOURCE 1
++#endif
++
++#include <sys/stat.h>
++
+@@ -2,0 +9,9 @@
++
++#ifdef __cplusplus
++#include <atomic>
++#ifndef _Atomic
++#define _Atomic(T) std::atomic<T>
++#endif
++typedef std::atomic_int atomic_int;
++typedef std::atomic_uint atomic_uint;
++#endif
+@@ -10,0 +26,2 @@
++#include <errno.h>
++#include <pthread.h>
+@@ -12 +29 @@
+-#if defined(__GLIBC__) && (__GLIBC__ < 2 || __GLIBC__ == 2 && __GLIBC_MINOR__ < 30)
++#include <sys/types.h>
+@@ -13,0 +31,29 @@
++#ifndef TEMP_FAILURE_RETRY
++#define TEMP_FAILURE_RETRY(exp) ({         \
++    __typeof__(exp) _rc;                   \
++    do {                                   \
++        _rc = (exp);                       \
++    } while (_rc == -1 && errno == EINTR); \
++    _rc; })
++#endif
++#if !defined(__GLIBC__)
++#include <libgen.h>
++#ifndef mmap64
++#define mmap64 mmap
++#endif
++#ifndef lseek64
++#define lseek64 lseek
++#endif
++#ifndef pread64
++#define pread64 pread
++#endif
++#ifndef basename
++#define basename(name) basename((char*)(name))
++#endif
++static inline const char* getprogname(void) {
++  return program_invocation_short_name != 0
++             ? program_invocation_short_name
++             : "";
++}
++#endif
++#if defined(__GLIBC__) && (__GLIBC__ < 2 || __GLIBC__ == 2 && __GLIBC_MINOR__ < 30)
+diff --git a/include/sys/cdefs.h b/include/sys/cdefs.h
+index 939cf2d..3e6455b 100644
+--- a/include/sys/cdefs.h
++++ b/include/sys/cdefs.h
+@@ -4,0 +5,2 @@
++#if defined(__has_include_next)
++#if __has_include_next(<sys/cdefs.h>)
+@@ -5,0 +8,4 @@
++#endif
++#else
++#include_next <sys/cdefs.h>
++#endif
+@@ -8 +14 @@
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/public_include/mcpelauncher/linker.h b/public_include/mcpelauncher/linker.h
+index 6443be6..7232ad4 100644
+--- a/public_include/mcpelauncher/linker.h
++++ b/public_include/mcpelauncher/linker.h
+@@ -16,4 +16 @@
+-#ifdef __APPLE__
+-typedef off_t off64_t;
+-#endif
+-#include "../bionic/libc/include/android/dlext.h"
++typedef struct android_dlextinfo android_dlextinfo;
+diff --git a/bionic/libc/include/android/dlext.h b/bionic/libc/include/android/dlext.h
+index 4d54e644a..177dd02a8 100644
+--- a/bionic/libc/include/android/dlext.h
++++ b/bionic/libc/include/android/dlext.h
+@@ -161 +161 @@ struct mcpelauncher_hook_t {
+-typedef struct {
++typedef struct android_dlextinfo {
+diff --git a/bionic/linker/dlfcn.cpp b/bionic/linker/dlfcn.cpp
+index 93e028ef8..b405441aa 100644
+--- a/bionic/linker/dlfcn.cpp
++++ b/bionic/linker/dlfcn.cpp
+@@ -97 +97,20 @@ _Unwind_Ptr __loader_dl_unwind_find_exidx(_Unwind_Ptr pc, int* pcount) __LINKER_
+-static pthread_mutex_t g_dl_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
++static pthread_mutex_t g_dl_mutex;
++static pthread_once_t g_dl_mutex_once = PTHREAD_ONCE_INIT;
++
++static void init_dl_mutex() {
++  pthread_mutexattr_t attributes;
++  if (pthread_mutexattr_init(&attributes) != 0) abort();
++  if (pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE) != 0) {
++    pthread_mutexattr_destroy(&attributes);
++    abort();
++  }
++  const int init_result = pthread_mutex_init(&g_dl_mutex, &attributes);
++  pthread_mutexattr_destroy(&attributes);
++  if (init_result != 0) abort();
++}
++
++static pthread_mutex_t* get_dl_mutex() {
++  if (pthread_once(&g_dl_mutex_once, init_dl_mutex) != 0) abort();
++  return &g_dl_mutex;
++}
++
+@@ -134 +153 @@ void __loader_android_get_LD_LIBRARY_PATH(char* buffer, size_t buffer_size) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -139 +158 @@ void __loader_android_update_LD_LIBRARY_PATH(const char* ld_library_path) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -147 +166 @@ static void* dlopen_ext(const char* filename,
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -169 +188 @@ void* dlsym_impl(void* handle, const char* symbol, const char* version, const vo
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -189 +208 @@ int __loader_dladdr(const void* addr, Dl_info* info) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -194 +213 @@ int __loader_dlclose(void* handle) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -203 +222 @@ int __loader_dl_iterate_phdr(int (*cb)(dl_phdr_info* info, size_t size, void* da
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -209 +228 @@ _Unwind_Ptr __loader_dl_unwind_find_exidx(_Unwind_Ptr pc, int* pcount) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -216 +235 @@ void __loader_android_set_application_target_sdk_version(int target) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -225 +244 @@ void __loader_android_dlwarning(void* obj, void (*f)(void*, const char*)) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -231 +250 @@ bool __loader_android_init_anonymous_namespace(const char* shared_libs_sonames,
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -247 +266 @@ android_namespace_t* __loader_android_create_namespace(const char* name,
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -267 +286 @@ bool __loader_android_link_namespaces(android_namespace_t* namespace_from,
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -280 +299 @@ bool __loader_android_link_namespaces_all_libs(android_namespace_t* namespace_fr
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -300 +319 @@ void __loader_add_thread_local_dtor(void* dso_handle) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+@@ -305 +324 @@ void __loader_remove_thread_local_dtor(void* dso_handle) {
+-  ScopedPthreadMutexLocker locker(&g_dl_mutex);
++  ScopedPthreadMutexLocker locker(get_dl_mutex());
+diff --git a/bionic/linker/linker.cpp b/bionic/linker/linker.cpp
+index 5cc42383b..4d8f5badd 100644
+--- a/bionic/linker/linker.cpp
++++ b/bionic/linker/linker.cpp
+@@ -1438,0 +1439 @@ static bool find_loaded_library_by_soname(android_namespace_t* ns,
++  TRACE("[find_loaded_library_by_soname] searching for '%s' in namespace '%s'", name, ns->get_name());
+@@ -1440,0 +1442 @@ static bool find_loaded_library_by_soname(android_namespace_t* ns,
++    TRACE("  candidate: realpath='%s', soname='%s'", si->get_realpath(), soname ? soname : "(null)");
+@@ -2855 +2856,0 @@ soinfo * soinfo::load_empty_library(const char *name)
+-  si->set_soname(bname ? bname + 1 : name);
+@@ -2862,0 +2864 @@ soinfo * soinfo::load_empty_library(const char *name)
++  si->set_soname(bname ? bname + 1 : name);
+diff --git a/bionic/linker/linker_main.cpp b/bionic/linker/linker_main.cpp
+index bcc054cdb..60d5052fb 100644
+--- a/bionic/linker/linker_main.cpp
++++ b/bionic/linker/linker_main.cpp
+@@ -105 +105 @@ bool solist_remove_soinfo(soinfo* si) {
+-    PRINT("name \"%s\"@%p is not in solist!", si->get_realpath(), si);
++    PRINT("name \"%s\"@%p is not in solist!", si->get_realpath(), (void*)si);
+diff --git a/bionic/linker/linker_soinfo.cpp b/bionic/linker/linker_soinfo.cpp
+index cb70ca162..4d0dfa0b4 100644
+--- a/bionic/linker/linker_soinfo.cpp
++++ b/bionic/linker/linker_soinfo.cpp
+@@ -32,0 +33 @@
++#include <stdint.h>
+@@ -47,0 +49,6 @@
++extern "C" void sighter_before_soinfo_constructors(const char* realpath,
++                                                    uintptr_t base)
++    __attribute__((weak));
++extern "C" bool sighter_should_skip_soinfo_constructors(const char* realpath)
++    __attribute__((weak));
++
+@@ -225,5 +225,25 @@ const ElfW(Sym)* soinfo_do_lookup(const char* name, const version_info* vi,
+ soinfo::soinfo(android_namespace_t* ns, const char* realpath,
+                const struct stat* file_stat, off64_t file_offset,
+                int rtld_flags) {
++  // Android's libc++ accepts zero-filled empty containers, but host
++  // libstdc++ keeps non-null self-pointers in objects such as std::string.
++  // End those initially constructed member lifetimes before the inherited
++  // raw clear, then reconstruct every non-trivial member afterwards.
++  std::destroy_at(&symbols);
++  std::destroy_at(&tlsdesc_args_);
++  std::destroy_at(&tls_);
++  std::destroy_at(&secondary_namespaces_);
++  std::destroy_at(&dt_runpath_);
++  std::destroy_at(&realpath_);
++  std::destroy_at(&parents_);
++  std::destroy_at(&children_);
+   memset(this, 0, sizeof(*this));
++
++  new (&children_) decltype(children_)();
++  new (&parents_) decltype(parents_)();
++  new (&realpath_) decltype(realpath_)();
++  new (&dt_runpath_) decltype(dt_runpath_)();
++  new (&secondary_namespaces_) decltype(secondary_namespaces_)();
++  new (&tls_) decltype(tls_)();
++  new (&tlsdesc_args_) decltype(tlsdesc_args_)();
+   new (&symbols) decltype(symbols)();
+@@ -531,0 +539,15 @@ static void call_array(const char* array_name __unused,
++    const char* ctor_trace = getenv("SIGHTER_CTOR_TRACE");
++    if (ctor_trace != nullptr && ctor_trace[0] != '\0' &&
++        strcmp(ctor_trace, "0") != 0) {
++      Dl_info info{};
++      uintptr_t offset = 0;
++      if (dladdr(reinterpret_cast<void*>(functions[i]), &info) != 0 &&
++          info.dli_fbase != nullptr) {
++        offset = reinterpret_cast<uintptr_t>(functions[i]) -
++                 reinterpret_cast<uintptr_t>(info.dli_fbase);
++      }
++      async_safe_format_log(ANDROID_LOG_INFO, "sighter",
++                            "%s[%d] %s function=%p offset=0x%zx",
++                            array_name, i, realpath ? realpath : "(null)",
++                            reinterpret_cast<void*>(functions[i]), offset);
++    }
+@@ -584,0 +607,8 @@ void soinfo::call_constructors() {
++  if (sighter_before_soinfo_constructors != nullptr) {
++    sighter_before_soinfo_constructors(get_realpath(), load_bias);
++  }
++  if (sighter_should_skip_soinfo_constructors != nullptr &&
++      sighter_should_skip_soinfo_constructors(get_realpath())) {
++    PRINT("\"%s\": skipping constructors by Sighter hook", get_realpath());
++    return;
++  }

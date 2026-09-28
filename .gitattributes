@@ -1,0 +1,4 @@
+# Preserve exact upstream whitespace in the provenance-locked Android core
+# snapshot. Local Sighter sources remain subject to git diff --check.
+third_party/mcpelauncher-linker/core/** -whitespace
+packaging/freebsd/*.patch -whitespace

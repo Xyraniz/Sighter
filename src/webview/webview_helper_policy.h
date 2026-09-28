@@ -1,0 +1,56 @@
+#ifndef SIGHTER_WEBVIEW_WEBVIEW_HELPER_POLICY_H_
+#define SIGHTER_WEBVIEW_WEBVIEW_HELPER_POLICY_H_
+
+#include <jsc/jsc.h>
+
+#include <cstddef>
+#include <string>
+#include <string_view>
+
+namespace sighter {
+namespace webview {
+
+inline constexpr std::size_t kMaximumHybridCommandBytes = 64 * 1024;
+inline constexpr char kExecuteRobloxHandler[] = "executeRoblox";
+inline constexpr char kRobloxWkHybridHandler[] = "RobloxWKHybrid";
+inline constexpr char kCompatibilityHandler[] = "sighterRobloxBridge";
+
+enum class CaptchaEventType {
+  kShown,
+  kSuccess,
+};
+
+struct CaptchaEvent {
+  CaptchaEventType type = CaptchaEventType::kShown;
+  std::string callback_id;
+};
+
+struct UriPolicyResult {
+  bool allowed = false;
+  bool privileged_bridge_allowed = false;
+  std::string scheme = "invalid";
+  std::string host = "none";
+};
+
+// An explicit WebKit sandbox setting takes precedence over host defaults.
+bool ShouldDisableWebKitSandbox(std::string_view kernel_version,
+                                const char* sandbox_override);
+// Match WebKit's WEBKIT_DISABLE_COMPOSITING_MODE override semantics.
+bool ShouldDisableWebViewHardwareAcceleration(
+    bool wayland_display, const char* compositing_override);
+const char* AndroidBridgeSource();
+std::string BuildRobloxAndroidUserAgent();
+bool IsBrowserLoginUrl(std::string_view url);
+bool IsEssentialWebResource(const char* uri);
+std::string BoundedLogToken(const char* value, std::string_view fallback);
+UriPolicyResult EvaluateNavigationUri(const char* uri);
+const char* CaptchaEventName(CaptchaEventType type);
+bool ExtractExecuteRobloxCommand(JSCValue* value, std::string* command);
+bool ExtractRobloxWkHybridCommand(JSCValue* value, std::string* command);
+bool ParseCaptchaEvent(std::string_view command, CaptchaEvent* event);
+std::string BuildCallbackScript(std::string_view callback_id);
+
+}  // namespace webview
+}  // namespace sighter
+
+#endif  // SIGHTER_WEBVIEW_WEBVIEW_HELPER_POLICY_H_

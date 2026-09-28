@@ -1,0 +1,29 @@
+#!/bin/sh
+# Copyright 2026 Sighter Project Authors
+# SPDX-License-Identifier: Apache-2.0
+
+set -eu
+
+APPDIR="${APPDIR:-$(CDPATH= cd -P "$(dirname -- "$0")" && pwd)}"
+
+InitializeAnyLinuxPaths() {
+  # quick-sharun preserves our custom AppRun, so its generated AppRun never
+  # runs these relocation hooks. WebKit and p11-kit use the patched paths
+  # even when WEBKIT_EXEC_PATH and SSL_CERT_FILE are set.
+  for anylinux_hook in 01-check-ca-certs.hook 01-path-mapping-hardcoded.hook; do
+    if [ -f "${APPDIR}/bin/${anylinux_hook}" ]; then
+      . "${APPDIR}/bin/${anylinux_hook}"
+    fi
+  done
+}
+
+if [ -n "${SHARUN_DIR:-}" ] && [ -x "${APPDIR}/bin/bash" ]; then
+  export PATH="${APPDIR}/bin:${PATH}"
+  export SIGHTER_ANYLINUX_BIN_DIR="${APPDIR}/bin"
+  export SIGHTER_BUNDLE_ROOT="${APPDIR}/usr/share/sighter-bundle"
+  InitializeAnyLinuxPaths
+  exec "${APPDIR}/bin/bash" \
+    "${SIGHTER_BUNDLE_ROOT}/sighter/scripts/portable_launcher.sh" "$@"
+fi
+
+exec "${APPDIR}/usr/share/sighter-bundle/run.sh" "$@"

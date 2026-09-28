@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "package": "com.roblox.client",
+      "version_name": "2.725.1142",
+      "version_code": 2546,
+      "abi": "x86_64",
+      "provider": "uptodown",
+      "page_url": "https://roblox.en.uptodown.com/android/download/1181025994-x",
+      "file_id": "1181025994",
+      "archive_size": 882739224,
+      "archive_sha256": "7e32e419aee44dba19c46933241dd73a25d2ee7d51802f6e8a89d5dba7d76876"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Sighter
+GenericName=Roblox Player
+Comment=Play Roblox on Linux
+Exec=sighter %u
+Icon=space.bigrat.sighter
+StartupWMClass=space.bigrat.sighter
+Categories=Game;
+Terminal=false
+MimeType=x-scheme-handler/roblox;x-scheme-handler/roblox-player;
+X-Sighter-Managed=true

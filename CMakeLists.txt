@@ -1,0 +1,834 @@
+# Copyright 2026 Sighter Project Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+cmake_minimum_required(VERSION 3.20)
+project(Sighter
+  VERSION 1.0.4
+  DESCRIPTION "Android Roblox compatibility runtime for Linux"
+  LANGUAGES CXX
+)
+
+include(GNUInstallDirs)
+find_package(Threads REQUIRED)
+
+set(SIGHTER_BUILD_GIT_COMMIT "unknown")
+set(SIGHTER_BUILD_GIT_DIRTY "unknown")
+find_package(Git QUIET)
+if(Git_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    RESULT_VARIABLE SIGHTER_GIT_REV_PARSE_RESULT
+    OUTPUT_VARIABLE SIGHTER_GIT_REV_PARSE_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(SIGHTER_GIT_REV_PARSE_RESULT EQUAL 0 AND
+     SIGHTER_GIT_REV_PARSE_OUTPUT MATCHES "^[0-9a-fA-F]+$")
+    string(TOLOWER "${SIGHTER_GIT_REV_PARSE_OUTPUT}"
+      SIGHTER_BUILD_GIT_COMMIT)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" status --porcelain --untracked-files=normal
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      RESULT_VARIABLE SIGHTER_GIT_STATUS_RESULT
+      OUTPUT_VARIABLE SIGHTER_GIT_STATUS_OUTPUT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(SIGHTER_GIT_STATUS_RESULT EQUAL 0)
+      if(SIGHTER_GIT_STATUS_OUTPUT STREQUAL "")
+        set(SIGHTER_BUILD_GIT_DIRTY "false")
+      else()
+        set(SIGHTER_BUILD_GIT_DIRTY "true")
+      endif()
+    endif()
+  endif()
+endif()
+
+set(SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST
+  "${CMAKE_SOURCE_DIR}/config/roblox_compatibility.json"
+  CACHE FILEPATH
+  "Fallback compatibility manifest used outside an installed runtime"
+)
+set(SIGHTER_DEFAULT_SIGNING_TRUST_MANIFEST
+  "${CMAKE_SOURCE_DIR}/config/roblox_signing_certificates.json"
+  CACHE FILEPATH
+  "Fallback signing trust manifest used outside an installed runtime"
+)
+set(SIGHTER_DISCORD_APPLICATION_ID "1537088975720812655" CACHE STRING
+  "Discord application ID baked into Sighter Rich Presence releases"
+)
+string(LENGTH "${SIGHTER_DISCORD_APPLICATION_ID}"
+  SIGHTER_DISCORD_APPLICATION_ID_LENGTH)
+if(NOT SIGHTER_DISCORD_APPLICATION_ID STREQUAL "" AND
+   (NOT SIGHTER_DISCORD_APPLICATION_ID MATCHES "^[0-9]+$" OR
+    SIGHTER_DISCORD_APPLICATION_ID_LENGTH LESS 17 OR
+    SIGHTER_DISCORD_APPLICATION_ID_LENGTH GREATER 20))
+  message(FATAL_ERROR
+    "SIGHTER_DISCORD_APPLICATION_ID must be empty or a Discord snowflake")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# libjnivm uses C++ exceptions, so these cannot be directory-wide.
+add_library(sighter_compile_options INTERFACE)
+target_compile_options(sighter_compile_options INTERFACE
+  "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic;-Wno-unused-parameter;-fno-exceptions;-g>"
+)
+
+function(sighter_apply_compile_options target_name)
+  target_link_libraries(${target_name} PRIVATE sighter_compile_options)
+endfunction()
+
+option(SIGHTER_ENABLE_UPSTREAM_JNIVM
+  "Build upstream libjnivm for the incremental JNI runtime migration" ON)
+if(SIGHTER_ENABLE_UPSTREAM_JNIVM)
+  set(JNIVM_ENABLE_TRACE OFF CACHE BOOL
+    "Enable tracing inside upstream libjnivm")
+  set(JNIVM_ENABLE_GC ON CACHE BOOL
+    "Enable local/global reference tracking inside upstream libjnivm")
+  set(JNIVM_ENABLE_DEBUG OFF CACHE BOOL
+    "Enable upstream libjnivm class-dump/code-generation support")
+  set(JNIVM_ENABLE_RETURN_NON_ZERO OFF CACHE BOOL
+    "Allow upstream libjnivm to fabricate unresolved object return values")
+  set(JNIVM_FAKE_JNI_MINECRAFT_LINUX_COMPAT OFF CACHE BOOL
+    "Enable legacy fake-jni static method promotion")
+  set(JNIVM_ENABLE_TESTS OFF CACHE BOOL
+    "Build upstream libjnivm's own test suite")
+  set(JNIVM_BUILD_EXAMPLES OFF CACHE BOOL
+    "Build upstream libjnivm examples")
+
+  add_subdirectory(third_party/libjnivm EXCLUDE_FROM_ALL)
+  # Work around a missing include in libjnivm.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(jnivm PRIVATE -include string)
+  endif()
+  target_link_libraries(jnivm PUBLIC Threads::Threads)
+  add_library(Sighter::UpstreamJni ALIAS jnivm)
+endif()
+
+add_subdirectory(third_party/mcpelauncher-linker)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(linker PRIVATE -w)
+endif()
+
+set(VULKAN_HEADERS_ENABLE_TESTS OFF CACHE BOOL
+  "Build Khronos Vulkan-Headers tests" FORCE)
+set(VULKAN_HEADERS_ENABLE_INSTALL OFF CACHE BOOL
+  "Install vendored Vulkan-Headers" FORCE)
+add_subdirectory(third_party/Vulkan-Headers EXCLUDE_FROM_ALL)
+
+include(CTest)
+if(BUILD_TESTING)
+  # Package builds disable tests and do not fetch Google Test.
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+  )
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+endif()
+
+find_package(OpenSSL REQUIRED)
+
+include(${CMAKE_SOURCE_DIR}/cmake/SighterPlatformGraphics.cmake)
+foreach(foundation_target IN ITEMS
+    sighter_platform_sdl
+    sighter_graphics_foundation
+    sighter_sdl_vulkan_wsi)
+  sighter_apply_compile_options(${foundation_target})
+endforeach()
+foreach(graphics_test_target IN ITEMS
+    bionic_egl_bridge_test
+    platform_graphics_foundation_test)
+  if(TARGET ${graphics_test_target})
+    sighter_apply_compile_options(${graphics_test_target})
+  endif()
+endforeach()
+
+include(${CMAKE_SOURCE_DIR}/cmake/SighterAudio.cmake)
+foreach(audio_target IN ITEMS
+    sighter_audio_core
+    sighter_audio_sdl
+    sighter_audio_fmod_java_runtime
+    sighter_fmod_jni_audio_bridge
+    sighter_audio_opensl_adapter
+    sighter_opensles)
+  sighter_apply_compile_options(${audio_target})
+endforeach()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  # GCC 16 reports a false array-bounds warning in this translation unit.
+  target_compile_options(sighter_audio_opensl_adapter PRIVATE
+    -Wno-array-bounds
+  )
+endif()
+if(TARGET audio_foundation_test)
+  sighter_apply_compile_options(audio_foundation_test)
+endif()
+if(TARGET opensl_playback_runtime_test)
+  sighter_apply_compile_options(opensl_playback_runtime_test)
+endif()
+if(TARGET fmod_java_audio_runtime_test)
+  sighter_apply_compile_options(fmod_java_audio_runtime_test)
+endif()
+if(TARGET fmod_jni_audio_bridge_test)
+  sighter_apply_compile_options(fmod_jni_audio_bridge_test)
+endif()
+
+include(${CMAKE_SOURCE_DIR}/cmake/SighterElfCompatibility.cmake)
+
+# Bionic stdio symbols must exist before the linker target.
+add_library(sighter_bionic_stdio_runtime STATIC
+  src/compat/bionic_stdio_runtime.cc
+)
+add_library(Sighter::BionicStdio ALIAS sighter_bionic_stdio_runtime)
+target_include_directories(sighter_bionic_stdio_runtime PUBLIC include)
+sighter_apply_compile_options(sighter_bionic_stdio_runtime)
+
+find_package(CURL REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBYAML REQUIRED IMPORTED_TARGET yaml-0.1)
+pkg_check_modules(MINIZIP REQUIRED IMPORTED_TARGET minizip)
+pkg_check_modules(CAPSTONE REQUIRED IMPORTED_TARGET capstone)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
+pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET "libadwaita-1>=1.6")
+pkg_check_modules(WEBKITGTK6 REQUIRED IMPORTED_TARGET webkitgtk-6.0)
+
+add_library(sighter_update STATIC
+  src/update/android_manifest.cc
+  src/update/apk_bundle.cc
+  src/update/apk_provider.cc
+  src/update/apk_signature.cc
+  src/update/apkpure_provider.cc
+  src/update/candidate_approval.cc
+  src/update/compatibility_catalog.cc
+  src/update/http_download.cc
+  src/update/host_abi_deriver.cc
+  src/update/payload_integrity.cc
+  src/update/payload_store.cc
+  src/update/readiness_canary.cc
+  src/update/unsafe_latest_runner.cc
+  src/update/update_config.cc
+  src/update/update_coordinator.cc
+  src/update/zip_archive.cc
+)
+add_library(Sighter::Update ALIAS sighter_update)
+target_include_directories(sighter_update PUBLIC include)
+target_link_libraries(sighter_update PUBLIC
+  Sighter::Compat
+  CURL::libcurl
+  OpenSSL::Crypto
+  PkgConfig::LIBYAML
+  PkgConfig::MINIZIP
+  PkgConfig::CAPSTONE
+  nlohmann_json::nlohmann_json
+  Threads::Threads
+)
+sighter_apply_compile_options(sighter_update)
+
+add_executable(sighter_updater src/update/main.cc)
+target_link_libraries(sighter_updater PRIVATE Sighter::Update)
+target_compile_definitions(sighter_updater PRIVATE
+  "SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST=\"${SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST}\""
+  "SIGHTER_DEFAULT_SIGNING_TRUST_MANIFEST=\"${SIGHTER_DEFAULT_SIGNING_TRUST_MANIFEST}\""
+)
+sighter_apply_compile_options(sighter_updater)
+
+add_library(sighter_legacy_jnivm STATIC
+  src/jnivm/jnivm.cc
+)
+add_library(Sighter::LegacyJni ALIAS sighter_legacy_jnivm)
+target_include_directories(sighter_legacy_jnivm PUBLIC include)
+sighter_apply_compile_options(sighter_legacy_jnivm)
+# A JDK is not required for these ABI-only headers.
+set(SIGHTER_JNI_INCLUDE_DIRS
+  ${CMAKE_SOURCE_DIR}/third_party/jni/include
+)
+target_include_directories(sighter_legacy_jnivm PUBLIC
+  ${SIGHTER_JNI_INCLUDE_DIRS}
+)
+
+add_library(sighter_runtime STATIC
+  src/runtime/command_line.cc
+  src/runtime/crash_report_policy.cc
+  src/runtime/discord_rpc.cc
+  src/runtime/device_memory_profile.cc
+  src/runtime/device_profile.cc
+  src/runtime/environment.cc
+  src/runtime/external_launch_broker.cc
+  src/runtime/frame_rate_policy.cc
+  src/runtime/fleasion.cc
+  src/runtime/game_mode.cc
+  src/runtime/game_session_coordinator.cc
+  src/runtime/graphics_launch_policy.cc
+  src/runtime/http_client_policy.cc
+  src/runtime/memory_limit.cc
+  src/runtime/owned_pthread.cc
+  src/runtime/performance_policy.cc
+  src/runtime/platform_cache_migration.cc
+  src/runtime/roblox_desktop_app_policy.cc
+  src/runtime/roblox_app_lifecycle.cc
+  src/runtime/roblox_browser_service_bridge.cc
+  src/runtime/roblox_capability_resolver.cc
+  src/runtime/roblox_experience_launch_bridge.cc
+  src/runtime/roblox_launch_uri.cc
+  src/runtime/roblox_game_session_native_adapter.cc
+  src/runtime/roblox_web_view_bridge.cc
+  src/runtime/roblox_permissions_bridge.cc
+  src/runtime/payload_update_preflight.cc
+  src/runtime/process_launch_policy.cc
+  src/runtime/process_diagnostics.cc
+  src/runtime/runtime_config.cc
+  src/runtime/runtime_config_bootstrap.cc
+  src/runtime/runtime_config_file.cc
+  src/runtime/runtime_paths.cc
+  src/runtime/session_log.cc
+  src/runtime/single_instance_lock.cc
+  src/runtime/startup_state_machine.cc
+  src/runtime/supported_launch_policy.cc
+  src/runtime/support_bundle.cc
+  src/runtime/system_proxy.cc
+  src/runtime/texture_memory_policy.cc
+)
+add_library(Sighter::Runtime ALIAS sighter_runtime)
+target_include_directories(sighter_runtime PUBLIC include)
+target_include_directories(sighter_runtime PUBLIC
+  ${SIGHTER_JNI_INCLUDE_DIRS}
+)
+target_compile_definitions(sighter_runtime PRIVATE
+  "SIGHTER_DISCORD_APPLICATION_ID=\"${SIGHTER_DISCORD_APPLICATION_ID}\""
+)
+set_property(SOURCE src/runtime/session_log.cc APPEND PROPERTY
+  COMPILE_DEFINITIONS
+  "SIGHTER_PROJECT_VERSION=\"${PROJECT_VERSION}\""
+  "SIGHTER_BUILD_GIT_COMMIT=\"${SIGHTER_BUILD_GIT_COMMIT}\""
+  "SIGHTER_BUILD_GIT_DIRTY=\"${SIGHTER_BUILD_GIT_DIRTY}\""
+  "SIGHTER_BUILD_TYPE=\"$<CONFIG>\""
+  "SIGHTER_BUILD_COMPILER_ID=\"${CMAKE_CXX_COMPILER_ID}\""
+  "SIGHTER_BUILD_COMPILER_VERSION=\"${CMAKE_CXX_COMPILER_VERSION}\""
+  "SIGHTER_BUILD_TARGET_SYSTEM=\"${CMAKE_SYSTEM_NAME}\""
+  "SIGHTER_BUILD_TARGET_PROCESSOR=\"${CMAKE_SYSTEM_PROCESSOR}\""
+)
+sighter_apply_compile_options(sighter_runtime)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  # GCC 16 reports a false array-bounds warning in nlohmann::json::dump().
+  set_property(SOURCE src/runtime/roblox_launch_uri.cc APPEND PROPERTY
+    COMPILE_OPTIONS -Wno-array-bounds
+  )
+endif()
+target_link_libraries(sighter_runtime PUBLIC Threads::Threads)
+target_link_libraries(sighter_runtime PRIVATE
+  OpenSSL::Crypto
+  CURL::libcurl
+  nlohmann_json::nlohmann_json
+  PkgConfig::GIO
+  PkgConfig::LIBYAML
+  ${CMAKE_DL_LIBS}
+)
+
+# Keep GTK out of the process that loads Android libraries.
+add_library(sighter_failure_dialog_runtime STATIC
+  src/runtime/failure_dialog.cc
+)
+add_library(Sighter::FailureDialog ALIAS sighter_failure_dialog_runtime)
+target_include_directories(sighter_failure_dialog_runtime PUBLIC include)
+target_compile_definitions(sighter_failure_dialog_runtime PRIVATE
+  "SIGHTER_INSTALL_LIBDIR=\"${CMAKE_INSTALL_LIBDIR}\""
+)
+sighter_apply_compile_options(sighter_failure_dialog_runtime)
+
+add_executable(sighter_failure_dialog
+  src/ui/sighter_failure_dialog.cc
+)
+target_link_libraries(sighter_failure_dialog PRIVATE PkgConfig::LIBADWAITA)
+sighter_apply_compile_options(sighter_failure_dialog)
+
+add_library(sighter_services STATIC
+  src/services/http_client.cc
+  src/services/auth_service.cc
+  src/services/browser_tracker_service.cc
+  src/services/client_settings_service.cc
+)
+add_library(Sighter::Services ALIAS sighter_services)
+target_include_directories(sighter_services PUBLIC include)
+target_link_libraries(sighter_services PUBLIC
+  sighter_runtime
+  CURL::libcurl
+  nlohmann_json::nlohmann_json
+)
+sighter_apply_compile_options(sighter_services)
+
+add_library(sighter_webview_launcher STATIC
+  src/runtime/webview_helper_launcher.cc
+)
+add_library(Sighter::WebViewLauncher ALIAS sighter_webview_launcher)
+target_include_directories(sighter_webview_launcher PUBLIC include)
+target_link_libraries(sighter_webview_launcher PUBLIC CURL::libcurl)
+sighter_apply_compile_options(sighter_webview_launcher)
+
+add_library(sighter_webview_helper_policy STATIC
+  src/webview/webview_helper_policy.cc
+)
+add_library(Sighter::WebViewHelperPolicy ALIAS sighter_webview_helper_policy)
+target_include_directories(sighter_webview_helper_policy PUBLIC src)
+target_link_libraries(sighter_webview_helper_policy PUBLIC
+  PkgConfig::WEBKITGTK6
+  nlohmann_json::nlohmann_json
+)
+sighter_apply_compile_options(sighter_webview_helper_policy)
+
+add_executable(sighter_webview_helper
+  src/webview/sighter_webview_helper.cc
+)
+target_link_libraries(sighter_webview_helper PRIVATE
+  Sighter::WebViewLauncher
+  Sighter::WebViewHelperPolicy
+  Sighter::Runtime
+  PkgConfig::GTK4
+  PkgConfig::WEBKITGTK6
+)
+sighter_apply_compile_options(sighter_webview_helper)
+
+add_library(sighter_auth_runtime_composition STATIC
+  src/runtime/auth_runtime_composition.cc
+  src/runtime/webview_roblox_cookie.cc
+)
+add_library(Sighter::AuthRuntimeComposition ALIAS
+  sighter_auth_runtime_composition)
+target_include_directories(sighter_auth_runtime_composition PUBLIC include)
+target_link_libraries(sighter_auth_runtime_composition PUBLIC
+  sighter_legacy_jnivm
+  sighter_runtime
+  sighter_services
+)
+sighter_apply_compile_options(sighter_auth_runtime_composition)
+
+add_library(sighter_linker STATIC
+  src/linker/linker.cc
+)
+target_include_directories(sighter_linker PUBLIC include)
+target_link_libraries(sighter_linker PUBLIC
+  dl
+  linker
+  sighter_compat
+  sighter_bionic_stdio_runtime
+  sighter_bionic_abi_exports
+)
+sighter_apply_compile_options(sighter_linker)
+target_compile_definitions(sighter_linker PUBLIC SIGHTER_USE_BIONIC_LINKER=1)
+# The Bionic linker expects IPLT boundaries that host executables do not have.
+target_link_options(sighter_linker INTERFACE
+  -Wl,--defsym=__rela_iplt_start=0
+  -Wl,--defsym=__rela_iplt_end=0
+)
+
+add_library(libc_shim STATIC
+  src/libc_shim/libc_shim.cc
+)
+target_include_directories(libc_shim PUBLIC include)
+sighter_apply_compile_options(libc_shim)
+target_link_libraries(sighter_linker PUBLIC libc_shim)
+
+add_subdirectory(stubs)
+foreach(stub_target IN ITEMS
+    stub_sys_m stub_sys_z stub_sys_dl stub_sys_c
+    stub_android stub_log stub_mediandk stub_openmax
+    stub_egl stub_glesv2 stub_vulkan)
+  sighter_apply_compile_options(${stub_target})
+endforeach()
+
+add_library(sighter_window STATIC
+  src/window/roblox_fullscreen_menu_request_gate.cc
+  src/window/video_driver_policy.cc
+  src/window/window.cc
+  src/window/window_creation_policy.cc
+  src/window/window_fullscreen_request_gate.cc
+  src/window/window_game_surface_bridge.cc
+  src/window/window_pointer_capture_owner.cc
+  src/window/window_resize_readiness_gate.cc
+  src/window/window_state_store.cc
+  src/window/window_surface_lifecycle.cc
+  src/window/window_text_input_owner.cc
+)
+target_include_directories(sighter_window PUBLIC src)
+sighter_apply_compile_options(sighter_window)
+target_link_libraries(sighter_window PUBLIC
+  Sighter::PlatformSdl
+  Sighter::SdlVulkanWsi
+  SDL3::SDL3
+  ${CMAKE_DL_LIBS}
+  PRIVATE Sighter::Runtime Sighter::GlesTextOverlay
+)
+
+add_library(sighter_roblox_output_device_runtime STATIC
+  src/audio/roblox_output_device_bridge.cc
+)
+target_include_directories(sighter_roblox_output_device_runtime PUBLIC include)
+target_include_directories(sighter_roblox_output_device_runtime PRIVATE src)
+target_link_libraries(sighter_roblox_output_device_runtime PUBLIC
+  sighter_compat
+  Sighter::AudioSdl
+  PRIVATE sighter_linker
+)
+sighter_apply_compile_options(sighter_roblox_output_device_runtime)
+
+add_library(sighter_roblox_fullscreen_runtime STATIC
+  src/runtime/roblox_fullscreen_runtime_bridge.cc
+)
+target_include_directories(sighter_roblox_fullscreen_runtime PUBLIC include)
+target_include_directories(sighter_roblox_fullscreen_runtime PRIVATE src)
+target_link_libraries(sighter_roblox_fullscreen_runtime PUBLIC
+  sighter_compat
+  PRIVATE
+    sighter_linker
+    sighter_window
+    stub_log
+)
+sighter_apply_compile_options(sighter_roblox_fullscreen_runtime)
+
+include(${CMAKE_SOURCE_DIR}/cmake/SighterInput.cmake)
+
+add_library(sighter_experience_runtime STATIC
+  src/runtime/jnivm_platform_web_callbacks.cc
+  src/runtime/roblox_experience_composition.cc
+  src/runtime/roblox_fresh_game_launch_controller.cc
+  src/runtime/roblox_platform_web_symbols.cc
+)
+add_library(Sighter::ExperienceRuntime ALIAS sighter_experience_runtime)
+target_include_directories(sighter_experience_runtime PUBLIC include)
+target_include_directories(sighter_experience_runtime PRIVATE src)
+target_link_libraries(sighter_experience_runtime PUBLIC
+  Sighter::Runtime
+  Sighter::WebViewLauncher
+  PkgConfig::UTF8PROC
+  PRIVATE
+    Sighter::AuthRuntimeComposition
+    Sighter::LegacyJni
+    sighter_linker
+    sighter_window
+)
+sighter_apply_compile_options(sighter_experience_runtime)
+
+# Compatibility exports still used by the old startup path.
+add_library(sighter_bionic_abi_exports STATIC
+  src/compat/bionic_abi_exports.cc
+  src/compat/http_client_spin_guard.cc
+)
+target_include_directories(sighter_bionic_abi_exports
+  PUBLIC include
+  PRIVATE src
+)
+sighter_apply_compile_options(sighter_bionic_abi_exports)
+# These exported Bionic FORTIFY symbols intentionally overlap glibc's
+# __*_chk entry points.  When the bridge is visible to whole-program LTO,
+# GCC can fold a fortified host call back into its own compatibility wrapper
+# and turn the resulting tail recursion into an infinite loop.  Keep this
+# translation unit opaque to interprocedural optimization and make its calls
+# to the host C library explicit external calls.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set_property(SOURCE src/compat/bionic_abi_exports.cc APPEND PROPERTY
+    COMPILE_OPTIONS
+      -fno-lto
+      -fno-builtin
+  )
+endif()
+target_link_libraries(sighter_bionic_abi_exports PRIVATE
+  sighter_bionic_stdio_runtime
+  sighter_window
+  Threads::Threads
+)
+
+include(CheckCXXSourceCompiles)
+include(CheckIncludeFileCXX)
+include(CMakePushCheckState)
+
+check_include_file_cxx(execinfo.h SIGHTER_HAVE_EXECINFO_H)
+if(NOT SIGHTER_HAVE_EXECINFO_H)
+  message(FATAL_ERROR
+    "execinfo.h is required for crash diagnostics; on musl install "
+    "libexecinfo-devel"
+  )
+endif()
+
+set(SIGHTER_EXECINFO_LINK_LIBRARY "")
+set(_sighter_execinfo_link_probe [=[
+  #include <execinfo.h>
+  int main() {
+    void* frames[1] = {};
+    const int count = backtrace(frames, 1);
+    return backtrace_symbols(frames, count) == nullptr;
+  }
+]=])
+check_cxx_source_compiles(
+  "${_sighter_execinfo_link_probe}"
+  SIGHTER_EXECINFO_IN_HOST_LIBC
+)
+if(NOT SIGHTER_EXECINFO_IN_HOST_LIBC)
+  find_library(SIGHTER_EXECINFO_LIBRARY NAMES execinfo REQUIRED)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES "${SIGHTER_EXECINFO_LIBRARY}")
+  check_cxx_source_compiles(
+    "${_sighter_execinfo_link_probe}"
+    SIGHTER_EXECINFO_IN_EXTERNAL_LIBRARY
+  )
+  cmake_pop_check_state()
+  if(NOT SIGHTER_EXECINFO_IN_EXTERNAL_LIBRARY)
+    message(FATAL_ERROR
+      "execinfo.h is available, but backtrace and backtrace_symbols cannot "
+      "be linked"
+    )
+  endif()
+  set(SIGHTER_EXECINFO_LINK_LIBRARY "${SIGHTER_EXECINFO_LIBRARY}")
+endif()
+unset(_sighter_execinfo_link_probe)
+
+add_library(sighter_legacy_runtime STATIC
+  src/legacy/legacy_runtime.cc
+  src/runtime/roblox_text_input_jni_bridge.cc
+)
+target_include_directories(sighter_legacy_runtime PRIVATE include src)
+sighter_apply_compile_options(sighter_legacy_runtime)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Diagnostics from signal handlers cannot handle a failed write.
+  set_property(SOURCE src/legacy/legacy_runtime.cc APPEND PROPERTY
+    COMPILE_OPTIONS -Wno-unused-result
+  )
+endif()
+target_link_libraries(sighter_legacy_runtime PRIVATE
+  sighter_legacy_jnivm
+  sighter_compat
+  sighter_runtime
+  sighter_input_runtime
+  sighter_experience_runtime
+  sighter_services
+  sighter_linker
+  sighter_bionic_abi_exports
+  libc_shim
+  sighter_window
+  sighter_graphics_foundation
+  ${SIGHTER_EXECINFO_LINK_LIBRARY}
+)
+target_compile_definitions(sighter_legacy_runtime PRIVATE
+  "SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST=\"${SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST}\""
+)
+
+add_executable(sighter src/main.cc)
+target_include_directories(sighter PRIVATE include src)
+sighter_apply_compile_options(sighter)
+target_compile_definitions(sighter PRIVATE
+  "SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST=\"${SIGHTER_DEFAULT_COMPATIBILITY_MANIFEST}\""
+)
+target_link_libraries(sighter PRIVATE
+  sighter_legacy_runtime
+  sighter_auth_runtime_composition
+  sighter_failure_dialog_runtime
+  sighter_fmod_jni_audio_bridge
+  sighter_roblox_output_device_runtime
+  sighter_roblox_fullscreen_runtime
+  sighter_window
+  libc_shim
+)
+
+# Libraries loaded with dlopen() need the stub symbols.
+target_link_options(sighter PRIVATE
+  -Wl,--export-dynamic
+)
+
+# Native FreeBSD helper for Linuxulator's unsupported DF socket option.
+# The helper is x86-64 assembly; other host architectures have nothing to
+# assemble.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+  set(SIGHTER_BUILD_FREEBSD_SOCKET_HELPER OFF)
+endif()
+option(SIGHTER_BUILD_FREEBSD_SOCKET_HELPER
+  "Build the native FreeBSD Linuxulator socket helper" ON)
+if(SIGHTER_BUILD_FREEBSD_SOCKET_HELPER)
+find_program(SIGHTER_LLD_EXECUTABLE NAMES ld.lld REQUIRED)
+find_program(SIGHTER_ELFEDIT_EXECUTABLE NAMES elfedit REQUIRED)
+get_filename_component(SIGHTER_LLD_DIRECTORY
+  "${SIGHTER_LLD_EXECUTABLE}" DIRECTORY)
+set(SIGHTER_FREEBSD_SOCKET_HELPER
+  "${CMAKE_BINARY_DIR}/sighter_freebsd_socket_helper")
+add_custom_command(
+  OUTPUT "${SIGHTER_FREEBSD_SOCKET_HELPER}"
+  COMMAND "${CMAKE_CXX_COMPILER}"
+    -x assembler-with-cpp
+    -nostdlib
+    -static
+    -no-pie
+    "-B${SIGHTER_LLD_DIRECTORY}/"
+    -fuse-ld=lld
+    -Wl,-e,_start,--build-id=none,-z,noexecstack
+    -o "${SIGHTER_FREEBSD_SOCKET_HELPER}"
+    "${CMAKE_SOURCE_DIR}/src/compat/freebsd_socket_helper.S"
+  COMMAND "${SIGHTER_ELFEDIT_EXECUTABLE}"
+    --output-osabi FreeBSD "${SIGHTER_FREEBSD_SOCKET_HELPER}"
+  DEPENDS "${CMAKE_SOURCE_DIR}/src/compat/freebsd_socket_helper.S"
+  COMMENT "Building native FreeBSD Linuxulator socket helper"
+  VERBATIM
+)
+add_custom_target(sighter_freebsd_socket_helper_build ALL
+  DEPENDS "${SIGHTER_FREEBSD_SOCKET_HELPER}"
+)
+add_dependencies(sighter sighter_freebsd_socket_helper_build)
+endif()
+
+set_target_properties(sighter PROPERTIES
+  BUILD_RPATH   "\$ORIGIN"
+  INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/sighter"
+)
+
+set(SIGHTER_INSTALL_RUNTIME_DIR "${CMAKE_INSTALL_LIBDIR}/sighter")
+set(SIGHTER_INSTALL_DATA_DIR "${CMAKE_INSTALL_DATADIR}/sighter")
+
+install(TARGETS sighter
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+install(TARGETS
+    sighter
+    sighter_updater
+    sighter_failure_dialog
+    sighter_webview_helper
+    sighter_audio_sdl
+    sighter_opensles
+    stub_sys_m
+    stub_sys_z
+    stub_sys_dl
+    stub_sys_c
+    stub_android
+    stub_log
+    stub_mediandk
+    stub_openmax
+    stub_egl
+    stub_glesv2
+    stub_vulkan
+  RUNTIME DESTINATION "${SIGHTER_INSTALL_RUNTIME_DIR}"
+  LIBRARY DESTINATION "${SIGHTER_INSTALL_RUNTIME_DIR}"
+)
+if(SIGHTER_BUILD_FREEBSD_SOCKET_HELPER)
+install(PROGRAMS "${SIGHTER_FREEBSD_SOCKET_HELPER}"
+  DESTINATION "${SIGHTER_INSTALL_RUNTIME_DIR}"
+)
+endif()
+install(FILES
+    config/roblox_compatibility.json
+    config/roblox_bootstrap_sources.json
+    config/roblox_host_abi_reference.json
+    config/roblox_signing_certificates.json
+  DESTINATION "${SIGHTER_INSTALL_DATA_DIR}/metadata"
+)
+install(FILES packaging/space.bigrat.sighter.desktop
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+)
+install(FILES packaging/space.bigrat.sighter.metainfo.xml
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
+)
+install(FILES packaging/space.bigrat.sighter.svg
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+)
+set(SIGHTER_HICOLOR_ICON_SIZES
+  16 22 24 32 36 48 64 72 96 128 192 256 512
+)
+# Generated icons are committed, so ImageMagick is not a build dependency.
+foreach(icon_size IN LISTS SIGHTER_HICOLOR_ICON_SIZES)
+  install(FILES
+      "packaging/icons/hicolor/${icon_size}x${icon_size}/apps/space.bigrat.sighter.png"
+    DESTINATION
+      "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${icon_size}x${icon_size}/apps"
+  )
+endforeach()
+install(CODE "
+  if(NOT DEFINED ENV{DESTDIR} OR \"\$ENV{DESTDIR}\" STREQUAL \"\")
+    find_program(SIGHTER_GTK_UPDATE_ICON_CACHE gtk-update-icon-cache)
+    if(SIGHTER_GTK_UPDATE_ICON_CACHE)
+      execute_process(
+        COMMAND \"\${SIGHTER_GTK_UPDATE_ICON_CACHE}\" --force
+                --ignore-theme-index
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/icons/hicolor\"
+        RESULT_VARIABLE SIGHTER_ICON_CACHE_RESULT
+      )
+      if(NOT SIGHTER_ICON_CACHE_RESULT EQUAL 0)
+        message(WARNING \"Failed to refresh the hicolor icon cache\")
+      endif()
+    endif()
+    find_program(SIGHTER_UPDATE_DESKTOP_DATABASE update-desktop-database)
+    if(SIGHTER_UPDATE_DESKTOP_DATABASE)
+      execute_process(
+        COMMAND \"\${SIGHTER_UPDATE_DESKTOP_DATABASE}\" -q
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/applications\"
+        RESULT_VARIABLE SIGHTER_DESKTOP_DATABASE_RESULT
+      )
+      if(NOT SIGHTER_DESKTOP_DATABASE_RESULT EQUAL 0)
+        message(WARNING \"Failed to refresh the desktop MIME cache\")
+      endif()
+    endif()
+  endif()
+")
+
+set(SIGHTER_PACKAGE_NAME "sighter" CACHE STRING
+  "Native package name"
+)
+set(SIGHTER_PACKAGE_VERSION_SUFFIX "" CACHE STRING
+  "Native package version suffix"
+)
+if(NOT SIGHTER_PACKAGE_NAME STREQUAL "sighter" AND
+   NOT SIGHTER_PACKAGE_NAME STREQUAL "sighter-nightly")
+  message(FATAL_ERROR
+    "SIGHTER_PACKAGE_NAME must be sighter or sighter-nightly")
+endif()
+
+set(CPACK_PACKAGE_NAME "${SIGHTER_PACKAGE_NAME}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}${SIGHTER_PACKAGE_VERSION_SUFFIX}")
+set(CPACK_PACKAGE_VENDOR "Sighter Project")
+set(CPACK_PACKAGE_CONTACT "Xyraniz <109302452+Xyraniz@users.noreply.github.com>")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Xyraniz/Sighter")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_DESCRIPTION
+  "Runs the Android Roblox client on Linux."
+)
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_STRIP_FILES TRUE)
+
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Xyraniz <109302452+Xyraniz@users.noreply.github.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0")
+set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
+set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+
+if(SIGHTER_PACKAGE_NAME STREQUAL "sighter-nightly")
+  set(CPACK_DEBIAN_PACKAGE_CONFLICTS "sighter")
+  set(CPACK_DEBIAN_PACKAGE_REPLACES "sighter")
+  set(CPACK_RPM_PACKAGE_CONFLICTS "sighter")
+else()
+  set(CPACK_DEBIAN_PACKAGE_CONFLICTS "sighter-nightly")
+  set(CPACK_DEBIAN_PACKAGE_REPLACES "sighter-nightly")
+  set(CPACK_RPM_PACKAGE_CONFLICTS "sighter-nightly")
+endif()
+include(CPack)
+
+add_dependencies(sighter all_stubs)
+add_dependencies(sighter sighter_failure_dialog)
+add_dependencies(sighter sighter_webview_helper)
+
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()

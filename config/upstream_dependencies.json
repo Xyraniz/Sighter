@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "dependencies": {
+    "libjnivm": {
+      "mode": "git-submodule",
+      "url": "https://github.com/ChristopherHX/libjnivm.git",
+      "commit": "f24b98c198fcc5c59a68d1efadd3f5791eb01c2e",
+      "tree": "77fa9e645f5b29ef4ac34a3fec8e36056f632e7b"
+    },
+    "OpenJDK-JNI-Headers": {
+      "mode": "vendored-unmodified-header-snapshot",
+      "url": "https://github.com/openjdk/jdk17u.git",
+      "tag": "jdk-17.0.20+8",
+      "upstream_commit": "8cbbca61432426a3441aa08838d930ef954ea1ba",
+      "license": "GPL-2.0-only WITH Classpath-exception-2.0",
+      "files": {
+        "third_party/jni/include/jni.h": {
+          "sha256": "1266aea5b9f5d5db1cb6f8e5c6c43cfa7f80bc4f72d7fe42c6131bb939dc70f4"
+        },
+        "third_party/jni/include/jni_md.h": {
+          "sha256": "88cb5c33e306900dd35a78d5a439087123b8e91b0986bb5acb42cc9bd2fcc42e"
+        },
+        "third_party/jni/LICENSE": {
+          "sha256": "4b9abebc4338048a7c2dc184e9f800deb349366bdf28eb23c2677a77b4c87726"
+        },
+        "third_party/jni/ASSEMBLY_EXCEPTION": {
+          "sha256": "a44eb7b5caf5534c6ef536b21edb40b4d6babf91bf97d9d45596868618b2c6fb"
+        }
+      }
+    },
+    "mcpelauncher-linker": {
+      "mode": "vendored-patched-snapshot",
+      "url": "https://github.com/minecraft-linux/mcpelauncher-linker.git",
+      "upstream_commit": "1ac3ea6c1cf4f73a84d73f0bff510fba94a7d0f2",
+      "vendor_tree": "fca44d85e3773c135ccfc603b14abdf6aeb8efd1",
+      "patch": "third_party/patches/mcpelauncher-linker.patch",
+      "nested_sources": {
+        "android_bionic": {
+          "url": "https://github.com/minecraft-linux/android_bionic.git",
+          "upstream_commit": "081b55b1f45745b1e6f93c49b3831107542a426d",
+          "vendor_tree": "0b15096de36ed5d14becbf1fe06e2522bc85f5d7"
+        },
+        "android_core": {
+          "mode": "vendored-unmodified-subtree-snapshot",
+          "url": "https://github.com/minecraft-linux/android_core",
+          "upstream_commit": "0235714fbf5593df145e8f991f82c5926c2df2df",
+          "upstream_tree": "add6a2d8f9759489fcdd5787b6c001922d4c92b4",
+          "vendor_tree": "b64d1a5874a602a09dcd6669b885ae1dc1a5021a",
+          "vendored_subtrees": {
+            "base": "1ebe3243f2a20d3b9b067a4806a20362abc0eefe",
+            "libcutils": "e9543f04aeb288bc54430ee4824951d7cada541f",
+            "liblog": "9e7341ce8c78a03e7e1c77b97a3c4e8c4c5153df",
+            "libziparchive": "d63ea583b4a44461f373306d86cf8f67445bc042"
+          }
+        }
+      },
+      "notes": [
+        "The historical android_core submodule is vendored as four exact upstream subtrees plus its Apache license marker and NOTICE; unrelated core directories remain omitted.",
+        "The patch records the C++ atomic compatibility layer, libc portability adapters, portable recursive locking, host C++ container reconstruction, the Linux PATH_MAX required by fortified realpath, and Sighter constructor hooks."
+      ]
+    },
+    "ANGLE-Headers": {
+      "mode": "vendored-unmodified-header-snapshot",
+      "url": "https://chromium.googlesource.com/angle/angle.git",
+      "upstream_commit": "384a29a8fa9ec59bd855e841d88993688cf833ef",
+      "upstream_tree": "649d698943fc81203494904cc22a1d448a423c56",
+      "files": {
+        "include/EGL/eglext_angle.h": {
+          "git_blob": "6184c866482e182f9e45b80d48746c58d671c3f0",
+          "sha256": "df92523469632129b6b0c37bcade9fa8cc449e23e487beda2cc130b4e4bd1df5"
+        },
+        "LICENSE": {
+          "git_blob": "0f65fd60fd68d465a2283378849f16532f5ee4f1",
+          "sha256": "bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a"
+        }
+      }
+    },
+    "Vulkan-Headers": {
+      "mode": "git-submodule",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "commit": "8d6039a455a7ecc7d2a592ff97f62db4e59b70bf"
+    }
+  }
+}
