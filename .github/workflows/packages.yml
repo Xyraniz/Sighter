@@ -394,7 +394,7 @@ jobs:
 
   publish:
     name: Publish continuous packages
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: [appimage, appimage-aarch64, deb, rpm, arch]
     runs-on: ubuntu-24.04
     timeout-minutes: 30

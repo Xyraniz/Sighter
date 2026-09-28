@@ -154,10 +154,8 @@ grep -Fq -- '--install-deps-from=flathub' "${GITHUB_CI}" ||
   Fail 'GitHub Actions does not install manifest dependencies from Flathub'
 grep -Fq -- '--default-branch=stable' "${GITHUB_CI}" ||
   Fail 'GitHub Actions does not produce the stable Flatpak branch'
-grep -Fq 'Sighter-x86_64.flatpak' "${GITHUB_CI}" ||
+grep -Fq 'Sighter-${FLATPAK_ARCH}.flatpak' "${GITHUB_CI}" ||
   Fail 'GitHub Actions does not build the installable Flatpak bundle'
-grep -Fq 'Sighter-aarch64.flatpak' "${GITHUB_CI}" ||
-  Fail 'GitHub Actions does not build the aarch64 Flatpak bundle'
 grep -Fq 'ubuntu-24.04-arm' "${GITHUB_CI}" ||
   Fail 'GitHub Actions does not build Flatpak on an ARM64 runner'
 grep -Fq 'actions/upload-artifact@' "${GITHUB_CI}" ||

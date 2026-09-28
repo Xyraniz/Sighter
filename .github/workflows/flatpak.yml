@@ -51,7 +51,7 @@ jobs:
             runner: ubuntu-24.04-arm
     env:
       FLATPAK_ARCH: ${{ matrix.arch }}
-      SIGHTER_PUBLISH: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+      SIGHTER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
       SIGHTER_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - name: Check out source
@@ -123,13 +123,7 @@ jobs:
 
   publish:
     name: Publish Flatpak bundles
-    if: >-
-      (github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event != 'pull_request' &&
-      github.event.workflow_run.head_branch == 'main') ||
-      (github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: flatpak
     runs-on: ubuntu-24.04
     timeout-minutes: 15

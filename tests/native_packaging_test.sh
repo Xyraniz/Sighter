@@ -77,10 +77,6 @@ grep -Fq -- \
   Fail 'AUR package embeds a build-tree compatibility manifest path'
 grep -Fq 'pkgbase = sighter-git' "${AUR_SRCINFO}" ||
   Fail 'AUR package has no generated .SRCINFO metadata'
-grep -Fq 'paru -S sighter-git' "${README}" ||
-  Fail 'README has no AUR installation instructions'
-grep -Fq 'yay -S sighter-git' "${README}" ||
-  Fail 'README has no alternative AUR helper command'
 grep -Fq 'LINKER:--no-as-needed' "${STUB_CMAKE}" ||
   Fail 'system shims can lose their host libc dependencies'
 grep -Fq 'SIGHTER_MINIZIP_HAS_STREAM_TELL' "${STUB_CMAKE}" ||

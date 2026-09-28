@@ -532,18 +532,19 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
     std::string_view variable;
     std::size_t maximum;
   };
-  for (const DiscordStringField& field : {
-           {"integrations.discord_rpc.text.browsing",
-            "SIGHTER_DISCORD_RPC_TEXT_BROWSING", 128},
-           {"integrations.discord_rpc.text.joining",
-            "SIGHTER_DISCORD_RPC_TEXT_JOINING", 128},
-           {"integrations.discord_rpc.text.playing",
-            "SIGHTER_DISCORD_RPC_TEXT_PLAYING", 128},
-           {"integrations.discord_rpc.text.state",
-            "SIGHTER_DISCORD_RPC_TEXT_STATE", 128},
-           {"integrations.discord_rpc.text.unknown_place",
-            "SIGHTER_DISCORD_RPC_TEXT_UNKNOWN_PLACE", 128},
-       }) {
+  constexpr std::array<DiscordStringField, 5> discord_string_fields{{
+      {"integrations.discord_rpc.text.browsing",
+       "SIGHTER_DISCORD_RPC_TEXT_BROWSING", 128},
+      {"integrations.discord_rpc.text.joining",
+       "SIGHTER_DISCORD_RPC_TEXT_JOINING", 128},
+      {"integrations.discord_rpc.text.playing",
+       "SIGHTER_DISCORD_RPC_TEXT_PLAYING", 128},
+      {"integrations.discord_rpc.text.state",
+       "SIGHTER_DISCORD_RPC_TEXT_STATE", 128},
+      {"integrations.discord_rpc.text.unknown_place",
+       "SIGHTER_DISCORD_RPC_TEXT_UNKNOWN_PLACE", 128},
+  }};
+  for (const DiscordStringField& field : discord_string_fields) {
     const std::optional<std::string> configured = value(field.yaml);
     if (!configured.has_value()) {
       continue;

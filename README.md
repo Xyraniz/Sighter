@@ -21,13 +21,6 @@ Corporation or VinegarHQ.
 | Linux AArch64 | Experimental | Builds target the Android `arm64-v8a` client; runtime validation is experimental. |
 | FreeBSD | Experimental | Runs in Linuxulator with an x86-64 Linux userspace; it is not a native FreeBSD binary. |
 
-## Downloads
-
-See [GitHub Releases](https://github.com/Xyraniz/Sighter/releases) for
-available packages. The CI workflows maintain a rolling
-[continuous prerelease](https://github.com/Xyraniz/Sighter/releases/tag/continuous)
-and publish packages when their build jobs complete successfully.
-
 ## Build from source
 
 ### Requirements
